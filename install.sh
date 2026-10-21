@@ -56,21 +56,33 @@ fi
 APACHECTL=$(command -v apachectl || command -v apache2ctl || true)
 [ -n "$APACHECTL" ] || die "apachectl not found"
 
-configtest() { "$APACHECTL" configtest >/dev/null 2>&1; }
+# Debian's apache2ctl loads /etc/apache2/envvars and passes options through to apache2.
+# RHEL's apachectl only knows a few verbs (no -M; graceful/start go via systemd),
+# so call httpd directly there.
+if [ "$FAMILY" = rhel ]; then
+    HTTPD=$(command -v httpd || echo /usr/sbin/httpd)
+    httpd_ctl() { "$HTTPD" "$@"; }
+else
+    httpd_ctl() { "$APACHECTL" "$@"; }
+fi
+
+configtest() { httpd_ctl -t >/dev/null 2>&1; }
 reload() {
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active -q "$SVC" 2>/dev/null; then
         systemctl reload "$SVC"
+    elif [ "$FAMILY" = rhel ]; then
+        httpd_ctl -k graceful
     else
-        "$APACHECTL" graceful >/dev/null 2>&1 \
-            || "$(command -v httpd || command -v apache2)" -k graceful
+        httpd_ctl graceful
     fi
 }
-module_loaded() { "$APACHECTL" -M 2>/dev/null | grep -q "php_dummy_module"; }
+list_modules()  { httpd_ctl -M 2>/dev/null; }
+module_loaded() { list_modules | grep -q "php_dummy_module"; }
 
 # ---------- status ----------
 if [ "$ACTION" = status ]; then
     if module_loaded; then log "mod_php_dummy is ACTIVE"; else log "mod_php_dummy is NOT loaded"; fi
-    "$APACHECTL" -M 2>/dev/null | grep -i php || true
+    list_modules | grep -i php || true
     [ -d "$STATE_DIR" ] && log "state: $(ls "$STATE_DIR" | tr '\n' ' ')"
     exit 0
 fi
@@ -359,7 +371,7 @@ else
 fi
 
 if ! configtest; then
-    "$APACHECTL" configtest 2>&1 | tail -5 >&2 || true
+    httpd_ctl -t 2>&1 | tail -5 >&2 || true
     rollback
     die "configtest failed - all changes rolled back, Apache untouched"
 fi

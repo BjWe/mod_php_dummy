@@ -13,7 +13,7 @@ jobs:
     name: install.sh in sync with src/
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: sh tools/build-installer.sh
       - run: git diff --exit-code install.sh
 
@@ -21,7 +21,7 @@ jobs:
     name: compile (-Wall -Wextra -Werror)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: sudo apt-get update -q && sudo apt-get install -y -q apache2-dev
       - run: apxs -c -Wc,-Wall -Wc,-Wextra -Wc,-Werror src/mod_php_dummy.c
 
@@ -34,7 +34,7 @@ jobs:
         image: ["debian:12", "ubuntu:22.04", "ubuntu:24.04"]
     container: ${{ matrix.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Apache + mod_php
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -58,7 +58,7 @@ jobs:
         image: ["rockylinux:9", "almalinux:9"]
     container: ${{ matrix.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Apache + PHP-FPM
         run: |
           dnf install -y -q httpd php php-fpm curl --allowerasing

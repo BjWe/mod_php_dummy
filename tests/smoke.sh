@@ -12,7 +12,23 @@ BASE=${BASE:-http://127.0.0.1}
 INSTALLER=${INSTALLER:-./install.sh}
 SECRET=S3CR3T_$$
 
-fail() { echo "FAIL: $*" >&2; exit 1; }
+fail() {
+    echo "::error title=smoke test::FAIL: $*"
+    for l in /var/log/apache2/error.log /var/log/httpd/error_log /var/log/php-fpm/error.log; do
+        [ -f "$l" ] || continue
+        echo "--- $l"; tail -20 "$l"
+        tail -4 "$l" | while IFS= read -r x; do echo "::warning title=$(basename "$l")::$x"; done
+    done
+    exit 1
+}
+run_installer() {
+    if ! cat "$INSTALLER" | sh "$@" > /tmp/installer.log 2>&1; then
+        cat /tmp/installer.log
+        tail -6 /tmp/installer.log | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r x; do echo "::warning title=installer::$x"; done
+        fail "installer exited non-zero ($*)"
+    fi
+    cat /tmp/installer.log
+}
 ok()   { echo "ok:   $*"; }
 code() { curl -s -o /dev/null -w '%{http_code}' "$BASE$1"; }
 body() { curl -s "$BASE$1"; }
@@ -32,7 +48,7 @@ body /index.php | grep -q PHP_RUNS || fail "baseline: PHP does not execute (test
 ok "baseline: PHP executes"
 
 # --- 2. install ---
-cat "$INSTALLER" | sh
+run_installer
 sleep 1
 for u in /index.php / /app/some/route /config.inc /legacy/page.html; do
     c=$(code "$u"); b=$(body "$u")
@@ -48,13 +64,13 @@ ok "Retry-After header present"
 ok "/style.css -> 200"
 
 # --- 3. idempotent ---
-cat "$INSTALLER" | sh | grep -q "already active" || fail "second run not idempotent"
+run_installer; grep -q "already active" /tmp/installer.log || fail "second run not idempotent"
 ok "second run is a no-op"
-cat "$INSTALLER" | sh -s -- --status | grep -q ACTIVE || fail "--status does not report ACTIVE"
+run_installer -s -- --status; grep -q ACTIVE /tmp/installer.log || fail "--status does not report ACTIVE"
 ok "--status reports ACTIVE"
 
 # --- 4. uninstall ---
-cat "$INSTALLER" | sh -s -- --uninstall
+run_installer -s -- --uninstall
 sleep 1
 if [ -n "${FPM_START:-}" ]; then sh -c "$FPM_START"; sleep 1; fi
 body /index.php | grep -q PHP_RUNS || fail "after uninstall: PHP does not execute again"
