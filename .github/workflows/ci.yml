@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer-in-sync:
+    name: install.sh in sync with src/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh tools/build-installer.sh
+      - run: git diff --exit-code install.sh
+
+  compile:
+    name: compile (-Wall -Wextra -Werror)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q apache2-dev
+      - run: apxs -c -Wc,-Wall -Wc,-Wextra -Wc,-Werror src/mod_php_dummy.c
+
+  debian-family:
+    name: e2e ${{ matrix.image }} (mod_php)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:12", "ubuntu:22.04", "ubuntu:24.04"]
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Apache + mod_php
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update -q
+          apt-get install -y -q apache2 libapache2-mod-php curl
+          a2enmod rewrite
+          sed -i 's/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
+          rm -f /var/www/html/index.html
+          apache2ctl start
+          sleep 1
+      - name: Smoke test
+        run: sh tests/smoke.sh
+
+  rhel-family:
+    name: e2e ${{ matrix.image }} (php-fpm)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["rockylinux:9", "almalinux:9"]
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Apache + PHP-FPM
+        run: |
+          dnf install -y -q httpd php php-fpm curl --allowerasing
+          sed -i '/<Directory "\/var\/www\/html">/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/httpd/conf/httpd.conf
+          mkdir -p /run/php-fpm
+          php-fpm -D
+          httpd -k start
+          sleep 1
+      - name: Smoke test
+        run: sh tests/smoke.sh
